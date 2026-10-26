@@ -171,6 +171,8 @@ public class VodConfig extends BaseConfig {
 
     private void apply(VodConfig candidate) throws InterruptedException {
         ConfigSource.checkInterrupted();
+        // Keep old spiders available during fetch/validation; reset before publishing a valid replacement.
+        if (isLoaded()) BaseLoader.get().clearNow();
         candidate.config.json(candidate.preparedJson.toString()).update();
         home = candidate.home;
         wall = candidate.wall;

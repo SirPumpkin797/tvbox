@@ -48,11 +48,13 @@ public class BaseLoader {
     }
 
     public void clear() {
-        Task.execute(() -> {
-            jarLoader.clear();
-            pyLoader.clear();
-            jsLoader.clear();
-        });
+        Task.execute(this::clearNow);
+    }
+
+    public void clearNow() {
+        jarLoader.clear();
+        pyLoader.clear();
+        jsLoader.clear();
     }
 
     public Spider getSpider(String key, String api, String ext, String jar) {
