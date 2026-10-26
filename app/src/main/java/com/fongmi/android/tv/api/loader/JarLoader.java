@@ -31,6 +31,7 @@ public class JarLoader {
     private final ConcurrentHashMap<String, Spider> spiders;
     private final ConcurrentHashMap<String, Object> locks;
     private volatile String recent;
+    private volatile int generation;
 
     public JarLoader() {
         loaders = new ConcurrentHashMap<>();
@@ -39,7 +40,8 @@ public class JarLoader {
         locks = new ConcurrentHashMap<>();
     }
 
-    public void clear() {
+    public synchronized void clear() {
+        generation++;
         spiders.values().forEach(Spider::destroy);
         loaders.clear();
         methods.clear();
@@ -51,18 +53,21 @@ public class JarLoader {
     }
 
     public void setRecent(String recent) {
-        this.recent = recent;
+        this.recent = loaders.containsKey(recent) ? recent : null;
     }
 
-    private void load(String key, File file) {
-        if (Thread.interrupted()) return;
+    private void load(String key, File file, int expectedGeneration) {
+        if (generation != expectedGeneration || Thread.currentThread().isInterrupted()) return;
         if (!Path.exists(file) || !file.setReadOnly()) return;
         File optDir = new File(App.get().getCodeCacheDir(), "dexopt" + File.separator + key);
         if (!optDir.exists()) optDir.mkdirs();
         DexClassLoader loader = new DexClassLoader(file.getAbsolutePath(), optDir.getAbsolutePath(), null, App.get().getClassLoader());
         invokeInit(loader);
-        invokeProxy(key, loader);
-        loaders.put(key, loader);
+        synchronized (this) {
+            if (generation != expectedGeneration || Thread.currentThread().isInterrupted()) return;
+            invokeProxy(key, loader);
+            loaders.put(key, loader);
+        }
     }
 
     private void invokeInit(DexClassLoader loader) {
@@ -86,6 +91,7 @@ public class JarLoader {
     }
 
     public void parseJar(String key, String jar) {
+        int expectedGeneration = generation;
         if (loaders.containsKey(key)) return;
         boolean asset = jar.startsWith("assets");
         if (asset) jar = UrlUtil.convert(jar);
@@ -98,7 +104,7 @@ public class JarLoader {
             String hash = texts[2];
             if (asset) {
                 File file = Download.create(jar, Path.jar(jar)).get();
-                if (Path.exists(file) && (hash.isEmpty() || verify(file, hashType, hash))) load(key, file);
+                if (Path.exists(file) && (hash.isEmpty() || verify(file, hashType, hash))) load(key, file, expectedGeneration);
             } else if (jar.startsWith("https")) {
                 if (hash.isEmpty()) {
                     SpiderDebug.log("jar", "rejected remote jar without ;sha256;/;md5; key=%s url=%s", key, jar);
@@ -114,7 +120,7 @@ public class JarLoader {
                     SpiderDebug.log("jar", "remote jar not trusted key=%s url=%s", key, jar);
                     return;
                 }
-                load(key, file);
+                load(key, file, expectedGeneration);
             } else if (jar.startsWith("file")) {
                 if (hash.isEmpty()) {
                     SpiderDebug.log("jar", "rejected file jar without ;sha256;/;md5; key=%s url=%s", key, jar);
@@ -129,7 +135,7 @@ public class JarLoader {
                     SpiderDebug.log("jar", "file jar not trusted key=%s url=%s", key, jar);
                     return;
                 }
-                load(key, file);
+                load(key, file, expectedGeneration);
             } else if (jar.startsWith("http")) {
                 SpiderDebug.log("jar", "rejected cleartext http jar key=%s url=%s", key, jar);
             } else {
@@ -165,22 +171,29 @@ public class JarLoader {
     }
 
     public Spider getSpider(String key, String api, String ext, String jar) {
+        int expectedGeneration = generation;
         String jaKey = Util.md5(jar);
-        String spKey = jaKey + key;
-        return spiders.computeIfAbsent(spKey, k -> {
+        String spKey = expectedGeneration + ":" + jaKey + key + Util.md5(api + "\n" + ext);
+        Spider result = spiders.computeIfAbsent(spKey, k -> {
             try {
                 parseJar(jaKey, jar);
                 DexClassLoader loader = loaders.get(jaKey);
-                if (loader == null) return new SpiderNull();
+                if (loader == null) return null;
                 Spider spider = (Spider) loader.loadClass("com.github.catvod.spider." + api.split("csp_")[1]).newInstance();
                 spider.siteKey = key;
                 spider.init(App.get(), ext);
                 return spider;
             } catch (Throwable e) {
                 SpiderDebug.log(e);
-                return new SpiderNull();
+                return null;
             }
         });
+        if (generation != expectedGeneration) {
+            spiders.remove(spKey);
+            return new SpiderNull();
+        }
+        if (result != null) setRecent(jaKey);
+        return result == null ? new SpiderNull() : result;
     }
 
     private DexClassLoader requireRecentLoader() {

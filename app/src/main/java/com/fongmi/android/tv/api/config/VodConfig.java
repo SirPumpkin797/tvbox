@@ -41,6 +41,8 @@ public class VodConfig extends BaseConfig {
 
     private Config requested;
     private boolean startupRequested;
+    private boolean manualRequested;
+    private ConfigSource.Mode mode = ConfigSource.Mode.STARTUP_AUTO;
     private JsonObject preparedJson;
     private List<Header> headers;
     private List<Proxy> proxies;
@@ -82,14 +84,22 @@ public class VodConfig extends BaseConfig {
     }
 
     public static void load(Config config, Callback callback) {
-        get().config(config).load(callback);
+        synchronized (get().requestLock) {
+            get().config(config).load(callback);
+        }
     }
 
-    public synchronized VodConfig startup() {
-        if (!startupRequested) {
+    public VodConfig startup() {
+        synchronized (requestLock) {
+            if (!startupRequested && !manualRequested) {
+                requested = defaultConfig();
+                mode = ConfigSource.Mode.STARTUP_AUTO;
+            } else if (!manualRequested) {
+                requested = getConfig();
+                mode = ConfigSource.Mode.MANUAL;
+            }
             startupRequested = true;
-            requested = defaultConfig();
-        } else requested = getConfig();
+        }
         return this;
     }
 
@@ -97,9 +107,18 @@ public class VodConfig extends BaseConfig {
         return config(Config.vod());
     }
 
-    public synchronized VodConfig config(Config config) {
-        this.requested = config;
+    public VodConfig config(Config config) {
+        synchronized (requestLock) {
+            requested = config;
+            mode = ConfigSource.Mode.MANUAL;
+            manualRequested = true;
+        }
         return this;
+    }
+
+    @Override
+    protected ConfigSource.Mode requestedMode() {
+        return mode;
     }
 
     @Override
@@ -142,20 +161,20 @@ public class VodConfig extends BaseConfig {
 
     @Override
     protected void load(Config config) throws Throwable {
-        apply(prepare(config));
+        apply(prepare(config, mode), -1);
     }
 
     @Override
-    protected void load(Config config, int id) throws Throwable {
-        VodConfig prepared = prepare(config);
+    protected void load(Config config, int id, ConfigSource.Mode mode) throws Throwable {
+        VodConfig prepared = prepare(config, mode);
         synchronized (this) {
             if (!isCurrent(id)) throw new InterruptedException("Superseded configuration");
-            apply(prepared);
+            apply(prepared, id);
         }
     }
 
-    private VodConfig prepare(Config requested) throws Exception {
-        Config cached = AppDatabase.get().getConfigDao().findLastSuccessfulVod();
+    private VodConfig prepare(Config requested, ConfigSource.Mode mode) throws Exception {
+        Config cached = mode == ConfigSource.Mode.STARTUP_AUTO ? AppDatabase.get().getConfigDao().findLastSuccessfulVod() : null;
         ConfigSource<VodConfig> source = new ConfigSource<>(
                 url -> Decoder.getConfigJson(UrlUtil.convert(url), TAG),
                 (url, name, object) -> {
@@ -166,39 +185,45 @@ public class VodConfig extends BaseConfig {
                 }, (url, name) -> Config.find(url, name, VOD));
         return source.load(requested.getUrl(), requested.getName(),
                 cached == null ? null : cached.getUrl(), cached == null ? null : cached.getName(),
-                cached == null ? null : cached.getJson());
+                cached == null ? null : cached.getJson(), mode);
     }
 
-    private void apply(VodConfig candidate) throws InterruptedException {
+    private void apply(VodConfig candidate, int id) throws InterruptedException {
         ConfigSource.checkInterrupted();
         // Keep old spiders available during fetch/validation; reset before publishing a valid replacement.
         if (isLoaded()) BaseLoader.get().clearNow();
-        candidate.config.json(candidate.preparedJson.toString()).update();
-        home = candidate.home;
-        wall = candidate.wall;
-        parse = candidate.parse;
-        doh = candidate.doh;
-        rules = candidate.rules;
-        sites = candidate.sites;
-        ads = candidate.ads;
-        flags = candidate.flags;
-        allowedOrigins = candidate.allowedOrigins;
-        parses = candidate.parses;
-        config = candidate.config;
-        setHeaders(candidate.headers);
-        setProxy(candidate.proxies);
-        setHosts(candidate.hosts);
-        RuleConfig.get().invalidate();
-        WebHomeExtensionRegistry.get().setGlobalSources(candidate.preparedJson.get("webHomeExtensions"), config.getUrl());
-        initWall(config, candidate.preparedJson);
-        // Live loading is independent of VOD startup and may download a spider JAR.
-        com.fongmi.android.tv.utils.Task.execute(() -> {
-            try {
-                if (this.config == candidate.config) initLive(candidate.config, candidate.preparedJson);
-            } catch (Exception e) {
-                SpiderDebug.log(e);
-            }
-        });
+        String spider = UrlUtil.resolve(candidate.config.getUrl(), Json.safeString(candidate.preparedJson, "spider"));
+        if (!TextUtils.isEmpty(spider)) BaseLoader.get().parseJar(spider, true);
+        ConfigSource.checkInterrupted();
+        synchronized (requestLock) {
+            if (id != -1 && !isCurrent(id)) throw new InterruptedException("Superseded configuration");
+            candidate.config.json(candidate.preparedJson.toString()).update();
+            home = candidate.home;
+            wall = candidate.wall;
+            parse = candidate.parse;
+            doh = candidate.doh;
+            rules = candidate.rules;
+            sites = candidate.sites;
+            ads = candidate.ads;
+            flags = candidate.flags;
+            allowedOrigins = candidate.allowedOrigins;
+            parses = candidate.parses;
+            config = candidate.config;
+            setHeaders(candidate.headers);
+            setProxy(candidate.proxies);
+            setHosts(candidate.hosts);
+            RuleConfig.get().invalidate();
+            WebHomeExtensionRegistry.get().setGlobalSources(candidate.preparedJson.get("webHomeExtensions"), config.getUrl());
+            initWall(config, candidate.preparedJson);
+            // Live loading is independent of VOD startup and may download a spider JAR.
+            com.fongmi.android.tv.utils.Task.execute(() -> {
+                try {
+                    if (this.config == candidate.config) initLive(candidate.config, candidate.preparedJson);
+                } catch (Exception e) {
+                    SpiderDebug.log(e);
+                }
+            });
+        }
     }
 
     @Override

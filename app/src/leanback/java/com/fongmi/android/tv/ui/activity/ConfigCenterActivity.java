@@ -21,6 +21,7 @@ import com.fongmi.android.tv.impl.ConfigListener;
 import com.fongmi.android.tv.ui.adapter.ConfigAdapter;
 import com.fongmi.android.tv.ui.base.BaseActivity;
 import com.fongmi.android.tv.ui.custom.SpaceItemDecoration;
+import com.fongmi.android.tv.utils.Notify;
 
 import org.greenrobot.eventbus.Subscribe;
 import org.greenrobot.eventbus.ThreadMode;
@@ -66,7 +67,17 @@ public class ConfigCenterActivity extends BaseActivity implements ConfigAdapter.
 
     @Override
     public void setConfig(Config config) {
-        if (type == 0) VodConfig.load(config, new Callback());
+        if (type == 0) VodConfig.load(config, new Callback() {
+            @Override
+            public void success() {
+                onConfigEvent(new ConfigEvent(ConfigEvent.Type.VOD));
+            }
+
+            @Override
+            public void error(String msg) {
+                Notify.show(msg);
+            }
+        });
         else if (type == 1) LiveConfig.load(config, new Callback());
         else WallConfig.load(config, new Callback());
     }

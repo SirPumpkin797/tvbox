@@ -31,6 +31,7 @@ abstract class BaseConfig {
     public static final int WALL = 2;
 
     private final AtomicInteger taskId = new AtomicInteger(0);
+    protected final Object requestLock = new Object();
 
     protected boolean sync;
     protected volatile Config config;
@@ -56,8 +57,18 @@ abstract class BaseConfig {
             beforeLoad();
             if (config == null) config = defaultConfig();
             Server.get().start();
-            load(config);
-            onLoadSuccess();
+            int id;
+            Config requested;
+            ConfigSource.Mode mode;
+            synchronized (requestLock) {
+                id = taskId.get();
+                requested = requestedConfig();
+                mode = requestedMode();
+            }
+            load(requested, id, mode);
+            synchronized (requestLock) {
+                if (isCurrent(id)) onLoadSuccess();
+            }
         } catch (Throwable e) {
             SpiderDebug.log(e);
         }
@@ -95,29 +106,42 @@ abstract class BaseConfig {
         return taskId.get() == id && !Thread.currentThread().isInterrupted();
     }
 
-    protected void load(Config config, int id) throws Throwable {
+    protected ConfigSource.Mode requestedMode() {
+        return ConfigSource.Mode.MANUAL;
+    }
+
+    protected void load(Config config, int id, ConfigSource.Mode mode) throws Throwable {
         load(config);
     }
 
-    public synchronized void load(Callback callback) {
-        beforeLoad();
-        int id = taskId.incrementAndGet();
-        if (future != null && !future.isDone()) future.cancel(true);
-        OkHttp.cancel(getTag());
-        Config requested = requestedConfig();
-        callback.start();
-        future = Task.submit(() -> loadConfig(id, requested, callback));
+    public void load(Callback callback) {
+        synchronized (requestLock) {
+            beforeLoad();
+            int id = taskId.incrementAndGet();
+            if (future != null && !future.isDone()) future.cancel(true);
+            OkHttp.cancel(getTag());
+            Config requested = requestedConfig();
+            ConfigSource.Mode mode = requestedMode();
+            callback.start();
+            future = Task.submit(() -> loadConfig(id, requested, mode, callback));
+        }
     }
 
-    protected void loadConfig(int id, Config config, Callback callback) {
+    protected void loadConfig(int id, Config config, ConfigSource.Mode mode, Callback callback) {
         try {
             Server.get().start();
-            load(config, id);
-            if (taskId.get() != id) return;
-            if (config.equals(this.config)) this.config.update();
-            onLoadSuccess();
-            App.post(() -> { if (taskId.get() == id) Notify.show(getConfig().getNotice()); });
-            App.post(() -> { if (taskId.get() == id) callback.success(); });
+            load(config, id, mode);
+            synchronized (requestLock) {
+                if (!isCurrent(id)) return;
+                if (config.equals(this.config)) this.config.update();
+                onLoadSuccess();
+            }
+            App.post(() -> {
+                if (taskId.get() != id) return;
+                Notify.show(getConfig().getNotice());
+                callback.success();
+                if (taskId.get() == id) postEvent();
+            });
         } catch (Throwable e) {
             SpiderDebug.log(e);
             if (isCanceled(e)) return;
@@ -126,8 +150,6 @@ abstract class BaseConfig {
                 if (taskId.get() != id) return;
                 callback.error(TextUtils.isEmpty(config.getUrl()) ? "" : Notify.getError(R.string.error_config_get, e));
             });
-        } finally {
-            if (taskId.get() == id) postEvent();
         }
     }
 

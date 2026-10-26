@@ -10,6 +10,7 @@ import java.util.Set;
 
 /** Resolves untrusted subscriptions without changing the active configuration. */
 final class ConfigSource<T> {
+    enum Mode { STARTUP_AUTO, MANUAL }
     interface Fetcher { String fetch(String url) throws Exception; }
     interface Parser<T> { T parse(String url, String name, JsonObject json) throws Exception; }
     interface DepotConsumer { void accept(String url, String name); }
@@ -25,11 +26,16 @@ final class ConfigSource<T> {
     }
 
     T load(String url, String name, String cachedUrl, String cachedName, String cachedJson) throws Exception {
+        return load(url, name, cachedUrl, cachedName, cachedJson, Mode.STARTUP_AUTO);
+    }
+
+    T load(String url, String name, String cachedUrl, String cachedName, String cachedJson, Mode mode) throws Exception {
         try {
             return resolve(url, name, new HashSet<>());
         } catch (Exception failure) {
             if (failure instanceof InterruptedException) throw failure;
             checkInterrupted();
+            if (mode == Mode.MANUAL) throw failure;
             if (cachedJson == null || cachedJson.isBlank()) throw failure;
             try {
                 JsonObject object = object(cachedJson);
