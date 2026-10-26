@@ -274,7 +274,7 @@ public class HomeActivity extends BaseActivity implements CustomTitleView.Listen
 
     private void initConfig() {
         SpiderDebug.log("startup", "config load start cost=%sms", System.currentTimeMillis() - App.time());
-        VodConfig.get().init().load(getCallback());
+        VodConfig.get().startup().load(getCallback());
         LiveConfig.get().init().load();
         WallConfig.get().init();
     }
@@ -601,7 +601,7 @@ public class HomeActivity extends BaseActivity implements CustomTitleView.Listen
 
     @Override
     public void reloadConfig() {
-        VodConfig.get().clear().config(getConfig()).load(new Callback() {
+        VodConfig.get().config(getConfig()).load(new Callback() {
             @Override
             public void start() {
                 mBinding.progressLayout.showProgress();

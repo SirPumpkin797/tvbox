@@ -27,6 +27,9 @@ public abstract class ConfigDao extends BaseDao<Config> {
     @Query("SELECT * FROM Config WHERE type = :type ORDER BY time DESC LIMIT 1")
     public abstract Config findOne(int type);
 
+    @Query("SELECT * FROM Config WHERE type = 0 AND json IS NOT NULL AND json != '' ORDER BY time DESC LIMIT 1")
+    public abstract Config findLastSuccessfulVod();
+
     @Query("SELECT * FROM Config WHERE url = :url AND type = :type")
     public abstract Config find(String url, int type);
 

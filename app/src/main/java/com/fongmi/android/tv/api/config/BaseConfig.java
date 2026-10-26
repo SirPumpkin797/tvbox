@@ -20,7 +20,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 
-import java.io.InterruptedIOException;
 import java.util.List;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -88,30 +87,45 @@ abstract class BaseConfig {
         OkHttp.dns().addAll(hosts);
     }
 
-    public void load(Callback callback) {
+    protected Config requestedConfig() {
+        return config;
+    }
+
+    protected boolean isCurrent(int id) {
+        return taskId.get() == id && !Thread.currentThread().isInterrupted();
+    }
+
+    protected void load(Config config, int id) throws Throwable {
+        load(config);
+    }
+
+    public synchronized void load(Callback callback) {
         beforeLoad();
         int id = taskId.incrementAndGet();
         if (future != null && !future.isDone()) future.cancel(true);
-        future = Task.submit(() -> loadConfig(id, config, callback));
+        OkHttp.cancel(getTag());
+        Config requested = requestedConfig();
         callback.start();
+        future = Task.submit(() -> loadConfig(id, requested, callback));
     }
 
     protected void loadConfig(int id, Config config, Callback callback) {
         try {
             Server.get().start();
-            OkHttp.cancel(getTag());
-            load(config);
+            load(config, id);
             if (taskId.get() != id) return;
-            if (config.equals(this.config)) config.update();
+            if (config.equals(this.config)) this.config.update();
             onLoadSuccess();
-            App.post(() -> Notify.show(config.getNotice()));
-            App.post(callback::success);
+            App.post(() -> { if (taskId.get() == id) Notify.show(getConfig().getNotice()); });
+            App.post(() -> { if (taskId.get() == id) callback.success(); });
         } catch (Throwable e) {
             SpiderDebug.log(e);
             if (isCanceled(e)) return;
             if (taskId.get() != id) return;
-            if (TextUtils.isEmpty(config.getUrl())) App.post(() -> callback.error(""));
-            else App.post(() -> callback.error(Notify.getError(R.string.error_config_get, e)));
+            App.post(() -> {
+                if (taskId.get() != id) return;
+                callback.error(TextUtils.isEmpty(config.getUrl()) ? "" : Notify.getError(R.string.error_config_get, e));
+            });
         } finally {
             if (taskId.get() == id) postEvent();
         }
@@ -120,8 +134,7 @@ abstract class BaseConfig {
     protected boolean isCanceled(Throwable e) {
         if ("Canceled".equals(e.getMessage())) return true;
         if (e instanceof InterruptedException) return true;
-        if (e instanceof InterruptedIOException) return true;
-        return e.getCause() instanceof InterruptedIOException;
+        return Thread.currentThread().isInterrupted();
     }
 
     protected JsonArray fetchArray(JsonObject object, String key) {

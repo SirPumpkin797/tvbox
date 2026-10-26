@@ -120,6 +120,8 @@ androidComponents {
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation "com.squareup.okhttp3:mockwebserver:${libs.versions.okhttp.get()}"
     implementation fileTree(dir: "libs", include: ["*.aar"])
     implementation project(':catvod')
     implementation project(':chaquo')

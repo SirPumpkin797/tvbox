@@ -8,6 +8,8 @@ import com.github.catvod.utils.Json;
 import com.github.catvod.utils.Util;
 
 import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -16,6 +18,7 @@ import javax.crypto.spec.IvParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
 import okhttp3.Response;
 
 public class Decoder {
@@ -30,7 +33,23 @@ public class Decoder {
     private static final int AES_BLOCK = 16;
 
     public static String getJson(String url, String tag) throws Exception {
-        try (Response res = OkHttp.newCall(url, tag).execute()) {
+        return getJson(url, tag, OkHttp.client());
+    }
+
+    public static String getConfigJson(String url, String tag) throws Exception {
+        return getConfigJson(url, tag, OkHttp.client());
+    }
+
+    static String getConfigJson(String url, String tag, OkHttpClient base) throws Exception {
+        OkHttpClient client = base.newBuilder().connectTimeout(5, TimeUnit.SECONDS)
+                .readTimeout(5, TimeUnit.SECONDS).writeTimeout(5, TimeUnit.SECONDS)
+                .callTimeout(5, TimeUnit.SECONDS).retryOnConnectionFailure(false).cache(null).build();
+        return getJson(url, tag, client);
+    }
+
+    private static String getJson(String url, String tag, OkHttpClient client) throws Exception {
+        try (Response res = OkHttp.newCall(client, url, tag).execute()) {
+            if (!res.isSuccessful()) throw new IOException("Configuration HTTP " + res.code());
             HttpUrl httpUrl = res.request().url();
             int size = HttpUrl.parse(url).querySize();
             if (httpUrl.querySize() == size) url = httpUrl.toString();

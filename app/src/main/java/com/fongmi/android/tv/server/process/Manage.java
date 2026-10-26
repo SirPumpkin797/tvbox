@@ -585,7 +585,7 @@ public class Manage implements Process {
     }
 
     private void reloadConfigs() {
-        App.post(() -> VodConfig.get().clear().config(VodConfig.get().getConfig()).load(new Callback() {
+        App.post(() -> VodConfig.get().config(VodConfig.get().getConfig()).load(new Callback() {
         }));
         App.post(() -> {
             if (LiveConfig.hasLoadedLives() || !LiveConfig.get().getConfig().isEmpty() || CustomCspSetting.hasLives()) LiveConfig.get().clear().config(LiveConfig.get().getConfig()).load(new Callback() {

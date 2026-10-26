@@ -314,7 +314,7 @@ public class CustomCspDialog extends BaseAlertDialog {
     }
 
     private void reloadConfigs() {
-        VodConfig.get().clear().config(VodConfig.get().getConfig()).load(new Callback() {
+        VodConfig.get().config(VodConfig.get().getConfig()).load(new Callback() {
         });
         if (LiveConfig.hasLoadedLives() || !LiveConfig.get().getConfig().isEmpty() || CustomCspSetting.hasLives()) LiveConfig.get().clear().config(LiveConfig.get().getConfig()).load(new Callback() {
         });

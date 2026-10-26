@@ -122,7 +122,7 @@ public class HomeActivity extends BaseActivity implements NavigationBarView.OnIt
     }
 
     private void initConfig() {
-        VodConfig.get().init().load(getCallback());
+        VodConfig.get().startup().load(getCallback());
         LiveConfig.get().init().load();
         WallConfig.get().init();
     }
