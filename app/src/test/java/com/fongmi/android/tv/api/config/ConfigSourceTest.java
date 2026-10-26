@@ -109,6 +109,13 @@ public class ConfigSourceTest {
         assertThrows(Exception.class, () -> source().load("root", "root", "cache", "cache", "{}"));
     }
 
+    @Test public void interruptedExceptionDoesNotUseCacheAfterFlagIsCleared() {
+        ConfigSource<String> source = new ConfigSource<>(url -> {
+            throw new InterruptedException("canceled");
+        }, (url, name, object) -> failResult(), (url, name) -> {});
+        assertThrows(InterruptedException.class, () -> source.load("root", "root", "cache", "cache", GOOD));
+    }
+
     @Test public void interruptionDoesNotFallBackOrFetchAnotherRepository() {
         ConfigSource<String> source = new ConfigSource<>(url -> {
             Thread.currentThread().interrupt();

@@ -28,6 +28,7 @@ final class ConfigSource<T> {
         try {
             return resolve(url, name, new HashSet<>());
         } catch (Exception failure) {
+            if (failure instanceof InterruptedException) throw failure;
             checkInterrupted();
             if (cachedJson == null || cachedJson.isBlank()) throw failure;
             try {
@@ -67,6 +68,7 @@ final class ConfigSource<T> {
                 try {
                     return resolve(depot.get("url").getAsString(), depotName(depot), path);
                 } catch (Exception e) {
+                    if (e instanceof InterruptedException) throw e;
                     checkInterrupted();
                     failure.addSuppressed(e);
                 }
